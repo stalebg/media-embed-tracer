@@ -12,6 +12,14 @@ on:
         description: 'Maximum articles to process'
         required: false
         default: '50'
+      debug:
+        description: 'Enable debug logging'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
 
 jobs:
   scrape:
@@ -57,5 +65,8 @@ jobs:
           # Processing limits
           MAX_ARTICLES: ${{ github.event.inputs.max_articles || '50' }}
           MAX_AGE_HOURS: '168'  # 7 days
+
+          # Debug mode
+          DEBUG: ${{ github.event.inputs.debug || 'false' }}
 
         run: python -m src.main

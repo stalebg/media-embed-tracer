@@ -24,8 +24,9 @@ from .platforms import (
 
 
 # Configure logging
+debug_mode = os.environ.get('DEBUG', 'false').lower() == 'true'
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG if debug_mode else logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[logging.StreamHandler(sys.stdout)]
 )
@@ -97,11 +98,15 @@ def process_article(
     """
     embeds = []
 
+    logger.debug(f"Processing article: {entry.title[:50]}... ({entry.url})")
+
     # Fetch the article HTML
     html = fetch_html(entry.url)
     if not html:
         logger.warning(f"Failed to fetch HTML for: {entry.url}")
         return embeds
+
+    logger.debug(f"  Fetched {len(html)} chars of HTML")
 
     # Process with each platform
     for platform in platforms:
@@ -113,9 +118,14 @@ def process_article(
                 article_published=entry.published,
                 article_summary=entry.summary,
             )
+            if platform_embeds:
+                logger.debug(f"  {platform.name}: found {len(platform_embeds)} embed(s)")
             embeds.extend(platform_embeds)
         except Exception as e:
             logger.error(f"Error processing {platform.name} for {entry.url}: {e}")
+
+    if embeds:
+        logger.info(f"Found {len(embeds)} embed(s) in: {entry.url}")
 
     return embeds
 
@@ -189,7 +199,7 @@ def post_pending_to_bluesky(
 
 def run():
     """Main entry point for the scraper."""
-    logger.info("Starting Media Embed Tracer")
+    logger.info("Starting media embed tracing")
 
     # Load configuration
     config = load_config()
@@ -268,7 +278,7 @@ def run():
         except Exception as e:
             logger.error(f"Error posting to Bluesky: {e}")
 
-    logger.info("Media Embed Tracer completed")
+    logger.info("Media embed tracing completed")
 
 
 if __name__ == "__main__":

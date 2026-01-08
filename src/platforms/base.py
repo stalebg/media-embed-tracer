@@ -91,6 +91,8 @@ class EmbedPost:
 
     def to_sheet_row(self) -> list:
         """Convert to a row for Google Sheets."""
+        # Only Bluesky posts can be reposted, others get "n/a"
+        repost_status = "pending" if self.platform == "bluesky" else "n/a"
         return [
             self.discovered_at.strftime("%Y-%m-%d"),
             self.discovered_at.strftime("%H:%M:%S"),
@@ -102,7 +104,7 @@ class EmbedPost:
             self.article_title,
             self.article_summary or "",
             self.article_published.strftime("%Y-%m-%d %H:%M") if self.article_published else "",
-            "pending",  # Repost status for Bluesky posts
+            repost_status,
         ]
 
     @staticmethod

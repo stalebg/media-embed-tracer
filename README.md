@@ -22,11 +22,11 @@ git clone https://github.com/your-username/media-embed-tracer.git
 
 1. Create a new Google Spreadsheet
 2. Note the URL (you'll need it for `SPREADSHEET_URL`)
-3. Share the spreadsheet with your service account email (see below)
+3. Share the spreadsheet with your service account email (see setup instruction below)
 
 ### 3. Set Up Google Service Account
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+1. Go to [Google Cloud Console](https://console.cloud.google.com)
 2. Create a new project or select an existing one
 3. Enable the Google Sheets API and Google Drive API
 4. Create a Service Account:
@@ -105,7 +105,7 @@ Store this as the `FEEDS_JSON` secret.
 
 ### 7. Configure Feed Names (Optional)
 
-For nicer Bluesky post formatting, create a JSON mapping:
+For nicer Bluesky post formatting, create a JSON feed dictionary:
 
 ```json
 {
@@ -174,25 +174,6 @@ The scraper creates/uses a worksheet called "All Embeds" with these columns:
 | Published Date | When the article was published |
 | Repost Status | `pending`, `posted`, or `failed` |
 
-## Local Development
-
-```bash
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # or `venv\Scripts\activate` on Windows
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Set environment variables
-export FEEDS_JSON='[{"name": "Test", "url": "https://example.com/rss"}]'
-export SPREADSHEET_URL='https://docs.google.com/spreadsheets/d/...'
-export GOOGLE_CREDENTIALS_JSON='{"type": "service_account", ...}'
-
-# Run
-python -m src.main
-```
-
 ## Supported Platforms
 
 ### Bluesky
@@ -221,7 +202,3 @@ python -m src.main
 - Reels
 - Photos
 - fb.watch short links
-
-## License
-
-MIT
