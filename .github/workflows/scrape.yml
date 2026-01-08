@@ -1,0 +1,61 @@
+name: Scrape RSS Feeds
+
+on:
+  # Run every 30 minutes
+  schedule:
+    - cron: '*/30 * * * *'
+
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      max_articles:
+        description: 'Maximum articles to process'
+        required: false
+        default: '50'
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run scraper
+        env:
+          # Feed configuration (JSON string)
+          FEEDS_JSON: ${{ secrets.FEEDS_JSON }}
+
+          # Google Sheets
+          SPREADSHEET_URL: ${{ secrets.SPREADSHEET_URL }}
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+
+          # Bluesky posting (optional)
+          BLUESKY_POSTING_ENABLED: ${{ secrets.BLUESKY_POSTING_ENABLED }}
+          BLUESKY_ACCOUNT: ${{ secrets.BLUESKY_ACCOUNT }}
+          BLUESKY_USERNAME: ${{ secrets.BLUESKY_USERNAME }}
+          BLUESKY_PASSWORD: ${{ secrets.BLUESKY_PASSWORD }}
+
+          # Alternative: Account-specific Bluesky credentials
+          BLUESKY_INTERNATIONAL_USERNAME: ${{ secrets.BLUESKY_INTERNATIONAL_USERNAME }}
+          BLUESKY_INTERNATIONAL_PASSWORD: ${{ secrets.BLUESKY_INTERNATIONAL_PASSWORD }}
+          BLUESKY_LOCALIZED_USERNAME: ${{ secrets.BLUESKY_LOCALIZED_USERNAME }}
+          BLUESKY_LOCALIZED_PASSWORD: ${{ secrets.BLUESKY_LOCALIZED_PASSWORD }}
+
+          # Feed name mapping for Bluesky posts (optional)
+          FEED_NAMES_JSON: ${{ secrets.FEED_NAMES_JSON }}
+
+          # Processing limits
+          MAX_ARTICLES: ${{ github.event.inputs.max_articles || '50' }}
+          MAX_AGE_HOURS: '168'  # 7 days
+
+        run: python -m src.main

@@ -1,0 +1,14 @@
+[
+  {
+    "name": "The Guardian",
+    "url": "https://www.theguardian.com/world/rss"
+  },
+  {
+    "name": "BBC News",
+    "url": "https://feeds.bbci.co.uk/news/rss.xml"
+  },
+  {
+    "name": "NYT World",
+    "url": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"
+  }
+]

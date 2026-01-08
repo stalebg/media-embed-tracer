@@ -1,0 +1,55 @@
+name: Scrape Localized Feeds
+
+on:
+  # Run every 30 minutes, offset by 15 minutes from main workflow
+  schedule:
+    - cron: '15,45 * * * *'
+
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      max_articles:
+        description: 'Maximum articles to process'
+        required: false
+        default: '50'
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run scraper
+        env:
+          # Feed configuration (JSON string) - LOCALIZED feeds
+          FEEDS_JSON: ${{ secrets.LOCALIZED_FEEDS_JSON }}
+
+          # Google Sheets - LOCALIZED spreadsheet
+          SPREADSHEET_URL: ${{ secrets.LOCALIZED_SPREADSHEET_URL }}
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+
+          # Bluesky posting - LOCALIZED account
+          BLUESKY_POSTING_ENABLED: ${{ secrets.LOCALIZED_BLUESKY_POSTING_ENABLED }}
+          BLUESKY_ACCOUNT: localized
+          BLUESKY_LOCALIZED_USERNAME: ${{ secrets.BLUESKY_LOCALIZED_USERNAME }}
+          BLUESKY_LOCALIZED_PASSWORD: ${{ secrets.BLUESKY_LOCALIZED_PASSWORD }}
+
+          # Feed name mapping for Bluesky posts
+          FEED_NAMES_JSON: ${{ secrets.LOCALIZED_FEED_NAMES_JSON }}
+
+          # Processing limits
+          MAX_ARTICLES: ${{ github.event.inputs.max_articles || '50' }}
+          MAX_AGE_HOURS: '168'  # 7 days
+
+        run: python -m src.main
