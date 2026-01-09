@@ -31,7 +31,8 @@ def extract_article_content(html: str) -> str:
     soup = BeautifulSoup(html, 'html.parser')
 
     # Remove obvious non-content elements first
-    for tag in soup.find_all(['header', 'footer', 'nav', 'aside', 'script', 'style', 'noscript']):
+    # Note: We keep <script> tags because social media embeds often have data in them
+    for tag in soup.find_all(['header', 'footer', 'nav', 'aside', 'style', 'noscript']):
         tag.decompose()
 
     # Strategy 1: Look for <article> tags
