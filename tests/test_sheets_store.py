@@ -593,8 +593,8 @@ def test_v1_tab_seeds_state_once_without_adding_dataset_rows():
 def test_v1_dedup_by_canonical_id_including_resolved_handles():
     from media_embed_tracer.resolve import Resolver
 
-    v1 = [V1_HEADERS, v1_row("https://twitter.com/u/status/12345"),
-          v1_row("https://bsky.app/profile/alice.example.com/post/3k")]
+    v1 = [V1_HEADERS, v1_row("https://twitter.com/u/status/12345", article="https://news.test/a2?utm_source=x"),
+          v1_row("https://bsky.app/profile/alice.example.com/post/3k", article="https://news.test/a1")]
     ss = FakeSpreadsheet({V1_TAB: v1, META_TAB: [["key", "value"], ["v1_imported", "x"]]})
     http = FakeHttp({FEED: rss("https://news.test/a1", "https://news.test/a2"),
                      "https://news.test/a1": page(bsky_quote(DID_A, "3k")),
@@ -627,7 +627,7 @@ def test_v1_handle_row_of_another_author_with_the_same_rkey_does_not_block_a_new
 def test_v1_handle_lookups_stop_past_the_deadline():
     from media_embed_tracer.resolve import Resolver
 
-    v1 = [V1_HEADERS, v1_row("https://bsky.app/profile/alice.example.com/post/3k")]
+    v1 = [V1_HEADERS, v1_row("https://bsky.app/profile/alice.example.com/post/3k", article="https://news.test/a1")]
     ss = FakeSpreadsheet({V1_TAB: v1, META_TAB: [["key", "value"], ["v1_imported", "x"]]})
     http = FakeHttp({FEED: rss("https://news.test/a1"),
                      "https://news.test/a1": page(bsky_quote(DID_A, "3k"), bsky_quote(DID_B, "3m")),
@@ -659,6 +659,94 @@ def test_v1_post_url_form_did_keeps_the_handle_in_author_and_matches_offline(mon
     jsonl_run(None, http, cfg(posting_enabled=True), bot, now=NOW + timedelta(minutes=30),
               store=store_for(ss, NOW + timedelta(minutes=30)))
     assert [r[10] for r in ss.tab(V1_TAB)[1:]] == ["posted"]
+
+
+V1_DONE = [["key", "value"], ["v1_imported", "x"]]
+
+
+def test_v1_one_row_per_article_and_post_like_v1():
+    """The same post in two articles gets two rows; an (article, post) pair already in the tab
+    (column F canonicalised: tracking params, trailing junk) is not repeated."""
+    v1 = [V1_HEADERS, v1_row("https://twitter.com/u/status/12345", article="https://news.test/a2?utm_source=rss")]
+    ss = FakeSpreadsheet({V1_TAB: v1, META_TAB: V1_DONE})
+    x = '<a href="https://x.com/u/status/12345">x</a>'
+    http = FakeHttp({FEED: rss("https://news.test/a1", "https://news.test/a2"),
+                     "https://news.test/a1": page(bsky_quote(DID_A, "3k"), x),
+                     "https://news.test/a2": page(bsky_quote(DID_A, "3k"), x)})
+    run_sheets(ss, http)
+    got = sorted((r[5], r[6]) for r in ss.tab(V1_TAB)[2:])
+    assert got == [("https://news.test/a1", f"https://bsky.app/profile/{DID_A}/post/3k"),
+                   ("https://news.test/a1", "https://x.com/u/status/12345"),
+                   ("https://news.test/a2", f"https://bsky.app/profile/{DID_A}/post/3k")]
+    # A recheck finds the same pairs: nothing new.
+    run_sheets(ss, http, now=NOW + timedelta(days=1))
+    assert len(ss.tab(V1_TAB)) == 5
+
+
+def test_v1_dedup_matches_the_final_url_too():
+    """Column F may hold the article's final (redirected) URL."""
+    v1 = [V1_HEADERS, v1_row("https://x.com/u/status/12345", article="https://www.news.test/final")]
+    ss = FakeSpreadsheet({V1_TAB: v1, META_TAB: V1_DONE})
+    store = store_for(ss)
+    store.load()
+    occ = Occurrence("x", "12345", "https://x.com/u/status/12345", "@u", "link", "https://news.test/a1",
+                     "https://www.news.test/final#top", "o", "news.test", "f", "T", "", "2026-03-01T00:00:00Z")
+    store.save(occurrences=[occ], articles=[], posts=[], seen=[], health=[], queue=[])
+    store.append_run(RunLog("2026-03-01T00:00:00Z", "2"))
+    assert len(ss.tab(V1_TAB)) == 2
+
+
+def test_v1_handle_rows_match_per_article_offline_and_resolved():
+    """Handle-form Post URLs (v1, and v2 rows written in the handle form) still match. Offline,
+    an unresolvable handle row with the same rkey counts only for the same article."""
+    from media_embed_tracer.resolve import Resolver
+
+    v1 = [V1_HEADERS, v1_row("https://bsky.app/profile/name.bsky.social/post/3m", article="https://news.test/a1")]
+    http = FakeHttp({FEED: rss("https://news.test/a1", "https://news.test/a2"),
+                     "https://news.test/a1": page(bsky_quote(DID_B, "3m")),
+                     "https://news.test/a2": page(bsky_quote(DID_B, "3m")),
+                     **plc(DID_B, "name.bsky.social")})
+    for v1_resolver in (None, Resolver(FakeHttp({}), APPVIEW, max_lookups=5),
+                        Resolver(http, APPVIEW, max_lookups=20)):
+        ss = FakeSpreadsheet({V1_TAB: [list(r) for r in v1], META_TAB: V1_DONE})
+        jsonl_run(None, http, None, None, store=store_for(ss, v1_resolver=v1_resolver))
+        assert [(r[5], r[6]) for r in ss.tab(V1_TAB)[2:]] == [
+            ("https://news.test/a2", f"https://bsky.app/profile/{DID_B}/post/3m")], v1_resolver
+
+
+def test_v1_status_after_posting_updates_every_row_of_the_post():
+    """Rows of one post in several articles (DID and handle form) all follow its status."""
+    from media_embed_tracer.resolve import Resolver
+
+    v1 = [V1_HEADERS, v1_row("https://bsky.app/profile/name.bsky.social/post/3m", "pending",
+                             article="https://old.test/a")]
+    ss = FakeSpreadsheet({V1_TAB: v1, META_TAB: V1_DONE})
+    http = FakeHttp({FEED: rss("https://news.test/a1", "https://news.test/a2"),
+                     "https://news.test/a1": page(bsky_quote(DID_B, "3m")),
+                     "https://news.test/a2": page(bsky_quote(DID_B, "3m")),
+                     **plc(DID_B, "name.bsky.social")})
+    bot = FakeBsky()
+    jsonl_run(None, http, cfg(posting_enabled=True, max_posts_per_run=0), bot,
+              store=store_for(ss, v1_resolver=Resolver(http, APPVIEW, max_lookups=20)))
+    assert [r[10] for r in ss.tab(V1_TAB)[1:]] == ["pending"] * 3
+    later = NOW + timedelta(minutes=30)
+    jsonl_run(None, http, cfg(posting_enabled=True), bot, now=later,
+              store=store_for(ss, later, v1_resolver=Resolver(http, APPVIEW, max_lookups=20)))
+    assert len(bot.created) == 1
+    assert [r[10] for r in ss.tab(V1_TAB)[1:]] == ["posted"] * 3
+
+
+def test_v1_page_furniture_gets_no_row_but_stays_in_occurrences():
+    urls = [f"https://news.test/a{i}" for i in range(1, 4)]
+    ss = FakeSpreadsheet({V1_TAB: [V1_HEADERS], META_TAB: V1_DONE})
+    http = FakeHttp({FEED: rss(*urls), **{u: page(bsky_quote(DID_A, "3k")) for u in urls},
+                     "https://news.test/a1": page(bsky_quote(DID_A, "3k"), bsky_quote(DID_B, "3m"))})
+    run_sheets(ss, http)
+    occ = rows(ss, "occurrences")
+    assert sorted(o["embed_type"] for o in occ) == ["blockquote"] + ["blockquote+template"] * 3
+    assert [r[6] for r in ss.tab(V1_TAB)[1:]] == [f"https://bsky.app/profile/{DID_B}/post/3m"]
+    assert {r["canonical_id"] for r in rows(ss, "posts")} == {f"at://{DID_A}/app.bsky.feed.post/3k",
+                                                              f"at://{DID_B}/app.bsky.feed.post/3m"}
 
 
 def test_v1_status_update_follows_rows_reordered_after_load():
@@ -777,8 +865,11 @@ def plc(did, handle):
             f"{APPVIEW}/xrpc/com.atproto.identity.resolveHandle?handle={handle}": {"did": did}}
 
 
-def test_v1_rows_use_v1_formats_and_handles_and_statuses_follow_handle_rows():
+def test_v1_rows_use_v1_formats_and_handles_and_statuses_follow_handle_rows(monkeypatch):
     from media_embed_tracer.resolve import Resolver
+    from media_embed_tracer.store import sheets
+
+    monkeypatch.setattr(sheets, "V1_POST_URL_FORM", "handle")
 
     ss = FakeSpreadsheet({V1_TAB: [V1_HEADERS], META_TAB: [["key", "value"], ["v1_imported", "x"]]})
     http = FakeHttp({FEED: rss("https://news.test/a1"),
@@ -808,7 +899,8 @@ def test_v1_rows_use_v1_formats_and_handles_and_statuses_follow_handle_rows():
     assert {r[6]: r[10] for r in ss.tab(V1_TAB)[1:]}["https://bsky.app/profile/name.bsky.social/post/3m"] == "posted"
 
 
-def test_v1_row_formats_exactly():
+def test_v1_row_formats_exactly(monkeypatch):
+    from media_embed_tracer.store import sheets
     from media_embed_tracer.store.sheets import v1_row
 
     x = Occurrence("x", "1853", "https://x.com/name/status/1853", "@name", "blockquote", "https://n.test/a",
@@ -820,8 +912,11 @@ def test_v1_row_formats_exactly():
                    "2026-10-31T23:55:00Z", "2026-11-01T13:05:09Z")
     row = v1_row(b, "posted", "name.bsky.social")
     assert row[:2] == ["2026-11-01", "13:05:09"] and row[2] == "bluesky" and row[9] == "2026-10-31 23:55"
-    assert row[4] == "name.bsky.social" and row[6] == "https://bsky.app/profile/name.bsky.social/post/3lx"
+    assert sheets.V1_POST_URL_FORM == "did"                                   # the default
+    assert row[4] == "name.bsky.social" and row[6] == f"https://bsky.app/profile/{DID_A}/post/3lx"
     assert v1_row(b, "pending")[4:7:2] == [DID_A, f"https://bsky.app/profile/{DID_A}/post/3lx"]   # no handle
+    monkeypatch.setattr(sheets, "V1_POST_URL_FORM", "handle")
+    assert v1_row(b, "posted", "name.bsky.social")[6] == "https://bsky.app/profile/name.bsky.social/post/3lx"
 
 
 def test_failed_v1_append_keeps_the_run_row_and_is_only_a_warning(caplog):

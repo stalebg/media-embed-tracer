@@ -20,6 +20,7 @@ from .feeds import FeedConfig, FeedSet, fetch_feed
 from .http import Http
 from .models import (
     DETECTOR_VERSION,
+    TEMPLATE_SUFFIX,
     ArticleCheck,
     FeedHealth,
     Hit,
@@ -47,7 +48,6 @@ MAX_FETCH_ERRORS = 3
 # runs are not consulted, so a post genuinely re-embedded over days keeps one label in the
 # dataset. The main-article detection (detect._content_roots) is the real protection.
 TEMPLATE_MIN_ARTICLES = 3
-TEMPLATE_SUFFIX = "+template"
 MIN_ARTICLES_FOR_RATIO = 4
 
 

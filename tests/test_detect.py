@@ -199,3 +199,16 @@ def test_real_teaser_heavy_page_structure(name):
     assert len(roots) == 1 and "article-entity" in roots[0].get("class")
     assert roots[0].find("article") is None and roots[0].find("h1") is not None   # nested teasers removed
     detect(fixture(name))   # no crash
+
+
+def test_archived_page_links_and_iframes_match_the_original_post():
+    html = ("<html><body><article><p>Text</p>"
+            '<a href="https://web.archive.org/web/20260209200936mp_/https://bsky.app/profile/x.bsky.social/post/abc">p</a>'
+            '<iframe src="https://web.archive.org/web/20260209200936if_/https://platform.twitter.com/embed/'
+            'Tweet.html?id=123456789"></iframe>'
+            '<blockquote class="twitter-tweet"><a href="http://web.archive.org/web/20260209200936/'
+            'https://twitter.com/u/status/987654321">t</a></blockquote>'
+            "</article></body></html>")
+    got = {h.key: h.embed_type for h in detect(html)}
+    assert got == {"bluesky:at://x.bsky.social/app.bsky.feed.post/abc": "link",
+                   "x:123456789": "iframe", "x:987654321": "blockquote"}

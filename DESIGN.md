@@ -28,7 +28,8 @@
   text; others if at least half its size), minus nested `<article>`s, aside/nav/footer and
   teaser/related/recommendation/preview/promo boxes. Inline scripts stay page-wide.
 - Page furniture: a post found in 3+ articles of one outlet in one run is recorded as
-  `<type>+template` and never quoted (a pending one becomes skipped). Earlier runs are not
+  `<type>+template`, never quoted (a pending one becomes skipped) and not written to
+  `All Embeds`. Earlier runs are not
   counted, so a post re-embedded over days keeps one label; the content root above is the
   real protection.
 - `article_summary` is the feed summary, HTML stripped, max 500 chars, never logged. It is
@@ -57,6 +58,8 @@
 - Markup is scanned in the article body: `<article>`, else `<main>`, else common content
   containers, else `<body>`. `<nav>` is skipped. Inline scripts are scanned page-wide.
 - Links inside a recognised embed are not counted again.
+- Wayback Machine (`web.archive.org/web/<digits>[xx_]/…`) and archive.today snapshot links
+  are matched as the URL they wrap (`platforms/_common.parse`).
 - Each post is reported once per article, with its strongest type.
 - Detection is pure. Lookups happen in `resolve.py`, cached and capped per run.
 - Unverified or legacy formats are marked `UNVERIFIED` in the platform modules.
@@ -118,7 +121,7 @@ Every failure raises `StoreError` (exit 2).
 | `_seen` | url | upsert; rows past `SEEN_RETENTION_DAYS` deleted; no summaries |
 | `_queue` | url, embed_type, article_url | made equal to the queue |
 | `_meta` | key | `instance`, `v1_imported` |
-| `All Embeds` | column G | v1 layout, only if it exists; appended after posting and the `runs` row |
+| `All Embeds` | columns F, G | v1 layout, only if it exists; appended after posting and the `runs` row |
 
 - **Load:** one metadata request plus one `values.batchGet`. Unexpected headers, rows
   without a header, or a foreign `instance` raise `StoreError` before scraping. Missing
@@ -139,14 +142,18 @@ Every failure raises `StoreError` (exit 2).
 - **v1 import:** if `v1_imported` is unset and an `All Embeds` tab exists, its rows seed
   posts and seen articles (no occurrences). Posted stays posted, pending becomes skipped.
   Up to 200 handle lookups.
-- **All Embeds dedup:** by canonical id from column G. A handle URL is resolved only on
-  an rkey match; if the handle cannot be resolved now (cap, deadline, error) the row counts
-  as known (no duplicate; at worst another author's post with the same rkey gets no row).
-  Repost Status of rows for posts changed this run is updated.
+- **All Embeds dedup:** one row per (article, post) as v1, keyed by column F (canonical
+  article URL, compared with the occurrence's article and final URL) and the canonical id
+  from column G. A handle URL is resolved only on an rkey match; if the handle cannot be
+  resolved now (cap, deadline, error) a row with the same rkey and article counts as known
+  (no duplicate; at worst another author's post with the same rkey in that article gets no
+  row). Rows skipped earlier are not backfilled. Repost Status of every row of a post
+  changed this run is updated.
 - **All Embeds format:** as v1 (UTC): Date `2026-11-01`, Time `0:27:38`, Platform `twitter`
   for X, Bluesky Author Handle with the verified handle, Published Date `2026-10-29 8:00`.
-  Post URL: `V1_POST_URL_FORM` in `store/sheets.py`, `"handle"` (default, as v1; the DID
-  when no handle is verified) or `"did"` (always the DID, matched offline). Handle lookups:
+  Post URL: `V1_POST_URL_FORM` in `store/sheets.py`, `"did"` (default: always the DID,
+  matched offline) or `"handle"` (as v1; the DID when no handle is verified). Existing
+  rows in either form are matched. Handle lookups:
   20 per run, own cap, none past MAX_RUN_MINUTES (then the DID).
 - **All Embeds failures:** the `runs` row is written first; a failed All Embeds write is a
   warning with the number of rows left out, not retried (occurrences has them).

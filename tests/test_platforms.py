@@ -120,3 +120,34 @@ def test_tiktok_short_link_is_marked_unresolved():
     ref = match_url("https://vm.tiktok.com/ZMabc123/")
     assert ref.unresolved == "tiktok-short"
     assert match_url("https://www.tiktok.com/t/ZTabc123/").unresolved == "tiktok-short"
+
+
+# --- archive snapshot links are matched as the original URL ---------------------------
+@pytest.mark.parametrize(("url", "key"), [
+    ("https://web.archive.org/web/20260209200936mp_/https://bsky.app/profile/x.bsky.social/post/abc",
+     "bluesky:at://x.bsky.social/app.bsky.feed.post/abc"),
+    ("https://web.archive.org/web/20260209200936/https://x.com/u/status/123?s=20", "x:123"),
+    ("https://web.archive.org/web/20260209200936id_/https://twitter.com/u/status/123", "x:123"),
+    ("http://web.archive.org/web/20260209200936if_/https://www.youtube.com/embed/dQw4w9WgXcQ",
+     "youtube:dQw4w9WgXcQ"),
+    ("https://web.archive.org/web/2026/http://x.com/u/status/123", "x:123"),
+    ("https://web.archive.org/web/20260209200936/https:/x.com/u/status/123", "x:123"),    # collapsed //
+    ("https://web.archive.org/web/20260209200936/x.com/u/status/123", "x:123"),            # no scheme
+    ("https://web.archive.org/web/1/https://web.archive.org/web/2/https://x.com/u/status/123", "x:123"),
+    ("https://archive.org/web/20260209200936/https://x.com/u/status/123", "x:123"),
+    ("https://archive.ph/2026.02.09-200936/https://x.com/u/status/123", "x:123"),
+    ("https://archive.today/o/AbCd1/https://x.com/u/status/123", "x:123"),
+    ("https://archive.is/newest/https://x.com/u/status/123", "x:123"),
+])
+def test_archive_links_unwrap(url, key):
+    ref = match_url(url)
+    assert ref is not None and ref.key == key
+
+
+@pytest.mark.parametrize("url", [
+    "https://web.archive.org/web/20260209200936/https://news.test/article",   # not a post
+    "https://archive.ph/AbCdE",                                               # short id: no original URL
+    "https://example.org/web/20260209200936/https://x.com/u/status/123",      # not an archive host
+])
+def test_archive_links_without_a_post_do_not_match(url):
+    assert match_url(url) is None
