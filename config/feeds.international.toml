@@ -1,0 +1,41 @@
+# Feed list for the "international" instance.
+# REPLACE WITH YOUR LIST. These well-known outlets are only a starting point.
+#
+# Per feed:  name (unique, used in the dataset), url, optional outlet (display name
+# in quote posts) and optional per_feed_cap (max new articles per run for this feed).
+# The FEEDS_JSON environment variable, if set, overrides this file.
+
+[[feeds]]
+name = "BBC News - World"
+url = "https://feeds.bbci.co.uk/news/world/rss.xml"
+outlet = "BBC News"
+
+[[feeds]]
+name = "The Guardian - World"
+url = "https://www.theguardian.com/world/rss"
+outlet = "The Guardian"
+
+[[feeds]]
+name = "The New York Times - World"
+url = "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"
+outlet = "The New York Times"
+
+[[feeds]]
+name = "Al Jazeera"
+url = "https://www.aljazeera.com/xml/rss/all.xml"
+outlet = "Al Jazeera"
+
+[[feeds]]
+name = "NPR News"
+url = "https://feeds.npr.org/1001/rss.xml"
+outlet = "NPR"
+
+[[feeds]]
+name = "DW - All"
+url = "https://rss.dw.com/rdf/rss-en-all"
+outlet = "DW"
+
+# Optional: display names by article domain (wins over the per-feed `outlet`).
+[outlet_names]
+"bbc.co.uk" = "BBC News"
+"bbc.com" = "BBC News"

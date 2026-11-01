@@ -1,72 +1,116 @@
-name: Scrape RSS Feeds
+name: Scrape (international)
 
 on:
-  # Run every 30 minutes
   schedule:
-    - cron: '*/30 * * * *'
-
-  # Allow manual trigger
+    - cron: '5,35 * * * *'
   workflow_dispatch:
-    inputs:
-      max_articles:
-        description: 'Maximum articles to process'
-        required: false
-        default: '50'
-      debug:
-        description: 'Enable debug logging'
-        required: false
-        default: 'false'
-        type: choice
-        options:
-          - 'false'
-          - 'true'
+
+permissions:
+  contents: write   # push the data and state branches (public-branch mode only; unused in sheets mode)
+
+# Branch modes (DATA_REPO, or PUBLIC_DATA_BRANCH=true): both scrape workflows push to the
+# same data and state branches (the state branch is force-pushed as one commit holding
+# both instances' state), so they share one group and never run in parallel. Otherwise
+# (sheets mode, or no store, which stops before touching anything) each instance has its
+# own sheet and nothing is shared: one group per workflow, so one instance's queued run
+# never cancels the other's. Decided from repository variables only: the secrets that
+# select sheets mode are not available in concurrency expressions. Runs are never
+# cancelled half-way through posting.
+concurrency:
+  group: ${{ (vars.DATA_REPO != '' || vars.PUBLIC_DATA_BRANCH == 'true') && 'scrape-branches' || format('scrape-{0}', github.workflow) }}
+  cancel-in-progress: false
 
 jobs:
   scrape:
-    runs-on: ubuntu-latest
-
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # Where state and data live (see scripts/branches.sh and the README), first match wins:
+    # DATA_REPO (+ secret DATA_REPO_TOKEN) = branches in a separate private repository;
+    # PUBLIC_DATA_BRANCH=true = branches in this repository;
+    # SPREADSHEET_URL + GOOGLE_CREDENTIALS_JSON secrets = the Google Sheet (sheets mode, no branches).
+    # None of these: the job stops before scraping.
+    env:
+      DATA_REPO: ${{ vars.DATA_REPO }}
+      PUBLIC_DATA_BRANCH: ${{ vars.PUBLIC_DATA_BRANCH }}
+      # Actions logs of a public repository are public: unless the data is public anyway
+      # (public-branch mode), the scraper scrubs URLs, at:// URIs, DIDs, handles and titles
+      # from everything it prints. That covers private-store and sheets mode.
+      LOG_REDACT: ${{ (vars.DATA_REPO != '' || vars.PUBLIC_DATA_BRANCH != 'true') && 'true' || 'false' }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          # No push token in .git/config: the scraper step must not be able to write anywhere.
+          # branches.sh authenticates the branch steps itself (GITHUB_TOKEN or DATA_REPO_TOKEN).
+          persist-credentials: false
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      # Fail closed before installing or scraping anything: without state the scraper
+      # could re-quote posts, and nothing may be pushed to an unintended place.
+      - name: Check data store
+        id: store
+        env:
+          DATA_REPO_TOKEN: ${{ secrets.DATA_REPO_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          # Only whether the sheet is configured; the URL and the key never reach this step.
+          SPREADSHEET_URL: ${{ secrets.SPREADSHEET_URL != '' && 'set' || '' }}
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON != '' && 'set' || '' }}
+        run: scripts/branches.sh mode
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: pip install '.[sheets]'
+
+      # Sheets mode has no branches: this step is skipped, and with it both commit steps.
+      - name: Check out data and state branches
+        id: branches
+        if: steps.store.outputs.mode != 'sheets'
+        env:
+          DATA_REPO_TOKEN: ${{ secrets.DATA_REPO_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: scripts/branches.sh checkout
 
       - name: Run scraper
         env:
-          # Feed configuration (JSON string)
-          FEEDS_JSON: ${{ secrets.FEEDS_JSON }}
-
-          # Google Sheets
+          # Fetch budget: keeps each run well inside the 15-minute offset between the two
+          # instances, so queued runs in the shared concurrency group (branch modes) are not
+          # cancelled.
+          MAX_RUN_MINUTES: "10"
+          INSTANCE_NAME: international   # recorded in the sheet (sheets mode): one sheet per instance
+          FEEDS_FILE: config/feeds.international.toml
+          # Secret names are kept from v1 so existing repository settings keep working.
+          FEEDS_JSON: ${{ secrets.FEEDS_JSON }}                               # optional override of FEEDS_FILE
+          FEED_NAMES_JSON: ${{ secrets.FEED_NAMES_JSON }}                     # optional domain -> display name
+          DATA_DIR: data-branch/international
+          STATE_DIR: state-branch/international
+          # Sheets mode: the bot's state and dataset. Other modes: an optional mirror.
           SPREADSHEET_URL: ${{ secrets.SPREADSHEET_URL }}
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          BLUESKY_POSTING_ENABLED: ${{ secrets.BLUESKY_POSTING_ENABLED || vars.BLUESKY_POSTING_ENABLED }}
+          BLUESKY_HANDLE: ${{ secrets.BLUESKY_INTERNATIONAL_USERNAME || secrets.BLUESKY_USERNAME }}
+          BLUESKY_APP_PASSWORD: ${{ secrets.BLUESKY_INTERNATIONAL_PASSWORD || secrets.BLUESKY_PASSWORD }}
+          QUOTE_TEMPLATE: ${{ vars.INTERNATIONAL_QUOTE_TEMPLATE }}
+          QUOTE_LANGS: ${{ vars.INTERNATIONAL_QUOTE_LANGS }}
+          QUOTE_LINKS: ${{ vars.QUOTE_LINKS }}   # optional, false = quote embed markup only
+        run: python -m media_embed_tracer run
 
-          # Bluesky posting (optional)
-          BLUESKY_POSTING_ENABLED: ${{ secrets.BLUESKY_POSTING_ENABLED }}
-          BLUESKY_ACCOUNT: ${{ secrets.BLUESKY_ACCOUNT }}
-          BLUESKY_USERNAME: ${{ secrets.BLUESKY_USERNAME }}
-          BLUESKY_PASSWORD: ${{ secrets.BLUESKY_PASSWORD }}
+      # Runs even if the scraper failed, so saved data and repost status are kept (skipped
+      # in sheets mode). Data first, state only after: a failed push means a re-check,
+      # never a lost occurrence.
+      - name: Commit data
+        id: commit_data
+        if: always() && steps.branches.outcome == 'success'
+        env:
+          DATA_REPO_TOKEN: ${{ secrets.DATA_REPO_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: scripts/branches.sh commit-data international
 
-          # Alternative: Account-specific Bluesky credentials
-          BLUESKY_INTERNATIONAL_USERNAME: ${{ secrets.BLUESKY_INTERNATIONAL_USERNAME }}
-          BLUESKY_INTERNATIONAL_PASSWORD: ${{ secrets.BLUESKY_INTERNATIONAL_PASSWORD }}
-          BLUESKY_LOCALIZED_USERNAME: ${{ secrets.BLUESKY_LOCALIZED_USERNAME }}
-          BLUESKY_LOCALIZED_PASSWORD: ${{ secrets.BLUESKY_LOCALIZED_PASSWORD }}
-
-          # Feed name mapping for Bluesky posts (optional)
-          FEED_NAMES_JSON: ${{ secrets.FEED_NAMES_JSON }}
-
-          # Processing limits
-          MAX_ARTICLES: ${{ github.event.inputs.max_articles || '50' }}
-          MAX_AGE_HOURS: '168'  # 7 days
-
-          # Debug mode
-          DEBUG: ${{ github.event.inputs.debug || 'false' }}
-
-        run: python -m src.main
+      - name: Commit state
+        if: always() && steps.commit_data.outcome == 'success'
+        env:
+          DATA_REPO_TOKEN: ${{ secrets.DATA_REPO_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: scripts/branches.sh commit-state international

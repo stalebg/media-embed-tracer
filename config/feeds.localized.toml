@@ -1,0 +1,16 @@
+# Feed list for the "localized" instance (e.g. one country or language).
+# REPLACE WITH YOUR LIST. This file ships empty on purpose: the workflow fails
+# with a configuration error until feeds are added here or FEEDS_JSON is set.
+#
+# Example:
+#
+# [[feeds]]
+# name = "Example Daily - Front page"
+# url = "https://www.example.com/rss.xml"
+# outlet = "Example Daily"
+# per_feed_cap = 3
+#
+# [outlet_names]
+# "example.com" = "Example Daily"
+
+feeds = []

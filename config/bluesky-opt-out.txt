@@ -1,0 +1,5 @@
+# Bluesky accounts that must never be quoted by the bot, one DID per line.
+# Add an author here when they ask to opt out (find the DID in the profile URL or via
+# https://bsky.social/xrpc/com.atproto.identity.resolveHandle?handle=<handle>).
+# Example:
+# did:plc:abcdefghijklmnopqrstuvwx
