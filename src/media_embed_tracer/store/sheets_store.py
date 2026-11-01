@@ -67,7 +67,7 @@ from ..models import (
 from ..platforms import PLATFORM_NAMES, bluesky, match_url
 from ..util import iso, utcnow
 from .base import StoreError, seen_expired
-from .sheets import V1_HEADERS, V1_TAB, _cell, _col, v1_rows
+from .sheets import V1_HEADERS, V1_TAB, _cell, _col, v1_article, v1_rows, v1_wanted
 
 log = logging.getLogger(__name__)
 
@@ -100,6 +100,7 @@ CELL_WARN_SHARE = 0.8
 RETRY_BUDGET_SECONDS = 90.0
 _TRANSIENT_STATUS = frozenset({408, 429, 500, 502, 503, 504})
 _V1_STATUS_COL = "K"
+_V1_ARTICLE_COL = 5    # 0-based index of "Article URL" (column F)
 _V1_URL_COL = 6        # 0-based index of "Post URL" (column G)
 
 # _call retry policies
@@ -557,55 +558,70 @@ class SheetsStore:
         return did
 
     def _write_v1(self, occurrences: list[Occurrence]) -> None:
-        """Append this run's occurrences to "All Embeds" in the v1 layout, deduplicated by
-        canonical post id against the existing rows, with the final repost status; then
-        update the Repost Status of existing rows whose post changed this run (as v1 did)."""
+        """Append this run's occurrences to "All Embeds" in the v1 layout: one row per
+        (article, post) as v1, deduplicated by (article URL, canonical post id) against the
+        existing rows, with the final repost status, and no page furniture; then update the
+        Repost Status of every existing row whose post changed this run (as v1 did)."""
+        occurrences = [o for o in occurrences if v1_wanted(o)]
         self._v1_unwritten = len(occurrences)
         if not self._v1_ok():
             self._v1_unwritten = 0
             return
         st = self._ensure()
         ws = self._ws[V1_TAB]
-        rows_by_key: dict[str, list[int]] = {}
-        handle_rows: dict[str, list[tuple[int, str]]] = {}   # rkey -> [(row, handle)] of handle URLs
+        rows_by_key: dict[str, list[int]] = {}               # post key -> rows (all articles)
+        pairs: set[tuple[str, str]] = set()                  # (v1_article(F), post key)
+        handle_rows: dict[str, list[tuple[int, str, str]]] = {}   # rkey -> [(row, handle, article)]
         for i, row in enumerate(self._v1_values[1:], start=2):
             url = str(row[_V1_URL_COL]) if len(row) > _V1_URL_COL else ""
             if not url:
                 continue
+            article = v1_article(str(row[_V1_ARTICLE_COL]))
             key, rkey = self._v1_key(url)
             rows_by_key.setdefault(key, []).append(i)
+            pairs.add((article, key))
             if rkey:
-                handle_rows.setdefault(rkey, []).append((i, bluesky.actor_of(match_url(url).canonical_id)))
+                handle_rows.setdefault(rkey, []).append((i, bluesky.actor_of(match_url(url).canonical_id), article))
 
         def locate(key: str) -> list[int]:
-            """Rows of a post. A Bluesky post may sit under a handle URL (v1, and v2 rows in the
-            "handle" form): only handle rows with the same rkey are resolved, each at most once."""
-            if not rows_by_key.get(key) and key.startswith("bluesky:"):
+            """Rows of a post. A Bluesky post may also sit under handle URLs (v1, and v2 rows
+            in the "handle" form): handle rows with the same rkey are resolved, each at most
+            once; the ones that cannot be resolved now stay in handle_rows."""
+            if key.startswith("bluesky:") and handle_rows.get(_rkey(key)):
                 rkey, left = _rkey(key), []
-                for i, handle in handle_rows.get(rkey, []):
+                for i, handle, article in handle_rows[rkey]:
                     did = self._did_of(handle)
                     if did:
-                        rows_by_key.setdefault(bluesky.make(did, rkey).key, []).append(i)
+                        resolved = bluesky.make(did, rkey).key
+                        rows_by_key.setdefault(resolved, []).append(i)
+                        pairs.add((article, resolved))
                     else:
-                        left.append((i, handle))
+                        left.append((i, handle, article))
                 handle_rows[rkey] = left
             return rows_by_key.get(key, [])
 
-        def known(o: Occurrence) -> bool:
+        def known(o: Occurrence, articles: set[str]) -> bool:
             # Matching never depends on the network succeeding: a handle URL with the same
-            # rkey whose handle cannot be resolved now (lookup cap, deadline, error) counts as
-            # this post. rkeys only collide between different authors, so at worst another
-            # author's post with the same rkey gets no All Embeds row (occurrences has it);
-            # a missing v1 row is preferred over a duplicate.
-            if o.key in rows_by_key or locate(o.key):
+            # rkey and the same article whose handle cannot be resolved now (lookup cap,
+            # deadline, error) counts as this post. rkeys only collide between different
+            # authors, so at worst another author's post with the same rkey in the same
+            # article gets no All Embeds row (occurrences has it); a missing v1 row is
+            # preferred over a duplicate.
+            if any((a, o.key) in pairs for a in articles):
                 return True
-            return o.platform == bluesky.NAME and bool(handle_rows.get(_rkey(o.canonical_id)))
+            locate(o.key)
+            if any((a, o.key) in pairs for a in articles):
+                return True
+            return o.platform == bluesky.NAME and any(
+                article in articles for _i, _h, article in handle_rows.get(_rkey(o.canonical_id), []))
 
         status = {(p.platform, p.canonical_id): p.repost_status for p in st.posts.values()}
         fresh = []
         for o in occurrences:
-            if not known(o):
-                rows_by_key[o.key] = []
+            articles = {v1_article(o.article_url), v1_article(o.final_url)} - {""}
+            if not known(o, articles):
+                rows_by_key.setdefault(o.key, [])
+                pairs.update((a, o.key) for a in articles)
                 fresh.append(o)
         new_rows = v1_rows(V1_HEADERS, set(), fresh, status, self._v1_handle) or []
         self._v1_unwritten = len(new_rows)

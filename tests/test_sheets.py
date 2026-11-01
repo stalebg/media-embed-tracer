@@ -124,16 +124,23 @@ def test_spreadsheet_key_parsing():
 
 
 def test_v1_tab_keeps_filling_when_present():
-    """An existing v1 "All Embeds" tab gets new rows in the v1 layout, deduplicated by post URL."""
-    old = ["2026-01-01", "10:00:00", "x", "a", "", "https://old", "https://x.com/i/status/9", "", "", "", ""]
+    """An existing v1 "All Embeds" tab gets new rows in the v1 layout: one per (article, post
+    URL) as v1, deduplicated against columns F and G, without page furniture."""
+    old = ["2026-01-01", "10:00:00", "x", "a", "", "https://old/?utm_source=rss", "https://x.com/i/status/9",
+           "", "", "", ""]
     v1 = FakeWorksheet(V1_TAB, [V1_HEADERS, old])
     ss = FakeSpreadsheet([v1])
-    dup = Occurrence("x", "9", "https://x.com/i/status/9", "", "embed", "https://b", "https://b", "o", "b", "f",
-                     "t", "", "2026-03-01T00:00:00Z")
-    write(SheetsMirror(ss), occurrences=[occ("Title"), occ("Title"), dup])
+
+    def x9(article, embed_type="embed"):
+        return Occurrence("x", "9", "https://x.com/i/status/9", "", embed_type, article, article, "o", "b", "f",
+                          "t", "", "2026-03-01T00:00:00Z")
+    write(SheetsMirror(ss), occurrences=[occ("Title"), occ("Title"), x9("https://old/"), x9("https://b"),
+                                         x9("https://c", "link+template")])
     assert v1.values[:2] == [V1_HEADERS, old]
     assert v1.values[2:] == [["2026-03-01", "0:00:00", "twitter", "a", "", "https://a", "https://x.com/i/status/1",
-                              "Title", "", "", ""]]
+                              "Title", "", "", ""],
+                             ["2026-03-01", "0:00:00", "twitter", "b", "", "https://b", "https://x.com/i/status/9",
+                              "t", "", "", ""]]
     assert set(v1.options) == {"RAW"}
 
 

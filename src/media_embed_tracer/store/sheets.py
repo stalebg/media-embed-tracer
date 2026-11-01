@@ -20,8 +20,8 @@ import logging
 import re
 from collections.abc import Callable
 
-from ..models import ArticleCheck, FeedHealth, Occurrence, Post, Record, RunLog
-from ..util import parse_iso
+from ..models import TEMPLATE_SUFFIX, ArticleCheck, FeedHealth, Occurrence, Post, Record, RunLog
+from ..util import canonical_article_url, parse_iso
 from .base import StoreError
 
 log = logging.getLogger(__name__)
@@ -45,11 +45,12 @@ V1_HEADERS = ["Date", "Time", "Platform", "Domain", "Author Handle", "Article UR
 # v1 cell formats (UTC): Date 2026-11-01, Time 0:27:38, Published Date 2026-10-29 8:00 (hours
 # without a leading zero), Platform "twitter" for X, Bluesky author as a bare handle.
 V1_PLATFORMS = {"x": "twitter"}
-# Form of a Bluesky "Post URL" (column G) in new All Embeds rows. "handle" (default, as v1):
-# https://bsky.app/profile/<verified handle>/post/<rkey>, the DID when no handle is verified.
-# "did": always https://bsky.app/profile/<did>/post/<rkey> (stable, matched offline). The
-# verified handle goes to Author Handle (column E) in both forms. Flip it here.
-V1_POST_URL_FORM = "handle"   # or "did"
+# Form of a Bluesky "Post URL" (column G) in new All Embeds rows. "did" (default):
+# always https://bsky.app/profile/<did>/post/<rkey> (stable, matched offline). "handle" (as
+# v1): https://bsky.app/profile/<verified handle>/post/<rkey>, the DID when no handle is
+# verified. The verified handle goes to Author Handle (column E) in both forms, and existing
+# rows in either form are matched. Flip it here.
+V1_POST_URL_FORM = "did"   # or "handle"
 _KEY_RE = re.compile(r"/spreadsheets/d/([A-Za-z0-9_-]+)")
 
 
@@ -118,18 +119,32 @@ def v1_row(o: Occurrence, status: str, handle: str = "") -> list:
             o.article_title, o.article_summary, f"{pub_date} {pub_time}".strip(), status]
 
 
-def v1_rows(header: list[str], seen_urls: set[str], occurrences, status: dict,
+def v1_article(url: str) -> str:
+    """Article URL as compared for All Embeds dedup (column F, or an occurrence's URLs)."""
+    return canonical_article_url(url) if url else ""
+
+
+def v1_wanted(o: Occurrence) -> bool:
+    """Page furniture (embed_type "<type>+template") gets no All Embeds row."""
+    return TEMPLATE_SUFFIX not in o.embed_type
+
+
+def v1_rows(header: list[str], seen: set[tuple[str, str]], occurrences, status: dict,
             handle_of: Callable[[str], str] | None = None) -> list[list] | None:
-    """Rows to append to an existing v1 "All Embeds" tab, in the v1 layout: one row per post
-    URL, deduplicated against `seen_urls` (column G). None when the headers do not match.
-    `handle_of(did)` returns a Bluesky handle or ''."""
+    """Rows to append to an existing v1 "All Embeds" tab, in the v1 layout: one row per
+    (article, post URL), as v1, deduplicated against `seen` ((v1_article(F), G) pairs) and
+    without page furniture. None when the headers do not match. `handle_of(did)` returns a
+    Bluesky handle or ''."""
     if header[: len(V1_HEADERS)] != V1_HEADERS:
         return None
     rows = []
     for o in occurrences:
-        if o.post_url in seen_urls:
+        if not v1_wanted(o):
             continue
-        seen_urls.add(o.post_url)
+        articles = {v1_article(o.article_url), v1_article(o.final_url)}
+        if any((a, o.post_url) in seen for a in articles):
+            continue
+        seen.update((a, o.post_url) for a in articles)
         handle = handle_of(o.author) if handle_of and o.platform == "bluesky" and o.author else ""
         rows.append(v1_row(o, status.get((o.platform, o.canonical_id), ""), handle))
     return rows
@@ -185,9 +200,11 @@ class SheetsMirror:
 
     def _append_v1(self, ws, occurrences, posts) -> None:
         """Append new occurrences to an existing v1 "All Embeds" tab (never created here).
-        Like v1: one row per post URL, deduplicated against column G."""
+        Like v1: one row per (article, post URL), deduplicated against columns F and G."""
         status = {(p.platform, p.canonical_id): p.repost_status for p in posts}
-        rows = v1_rows(ws.row_values(1), set(ws.col_values(7)[1:]), occurrences, status)
+        values = ws.get_all_values()
+        seen = {(v1_article(str(r[5])), str(r[6])) for r in values[1:] if len(r) > 6}
+        rows = v1_rows(values[0] if values else [], seen, occurrences, status)
         if rows is None:
             log.warning("sheets: %r has unexpected headers; not writing v1 rows", V1_TAB)
             return

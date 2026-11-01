@@ -25,6 +25,8 @@ EMBED_TYPES = ("blockquote", "iframe", "widget", "script-data", "link", "unknown
 # Markup found inside the article body that renders as an embed. These always trigger quote posts
 # (links only when QUOTE_LINKS is on, see repost.is_quotable).
 EMBED_MARKUP_TYPES = frozenset({"blockquote", "iframe", "widget"})
+# Suffix on the embed_type of page furniture (see pipeline.TEMPLATE_MIN_ARTICLES).
+TEMPLATE_SUFFIX = "+template"
 EMBED_PRIORITY = {"blockquote": 5, "iframe": 5, "widget": 4, "script-data": 3, "link": 1, "unknown": 0}
 
 
