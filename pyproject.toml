@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "media-embed-tracer"
+version = "2.0.0"
+description = "Find social media posts embedded in news articles from RSS feeds; record them as a dataset and optionally quote-post Bluesky embeds."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "beautifulsoup4==4.15.0",
+    "feedparser==6.0.14",
+    "requests==2.34.2",
+    "urllib3==2.8.0",
+    "regex==2026.9.29",
+]
+
+[project.optional-dependencies]
+sheets = [
+    "gspread==6.2.1",
+    "google-auth==2.62.0",
+]
+dev = [
+    "pytest==9.2.0",
+    "ruff==0.17.3",
+]
+
+[project.scripts]
+media-embed-tracer = "media_embed_tracer.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "RUF"]
+ignore = ["S101", "RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S", "E501"]
