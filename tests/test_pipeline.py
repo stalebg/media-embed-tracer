@@ -601,3 +601,63 @@ def test_an_unexpected_create_error_leaves_the_status_and_stops_posting(tmp_path
     assert {p["repost_status"] for p in posts(tmp_path).values()} == {"pending"}
     assert len(read_partitions(tmp_path / "data" / "runs")) == 1
     assert "RuntimeError" in caplog.text and "Minister quits" not in caplog.text
+
+
+# --- external review fixes ---------------------------------------------------------
+
+def test_a_recovered_quote_counts_toward_the_daily_caps(tmp_path):
+    """A quote whose status write was lost is repaired from the bot's own feed and counted
+    before the caps are applied: with a daily cap of 1, no second quote follows."""
+    http = FakeHttp({FEED: rss("https://news.test/a1"), "https://news.test/a1": page(bsky_quote(DID_A, "3kz"))})
+    bot = FakeBsky()
+    store = FailingStore(tmp_path / "data", tmp_path / "state", now=NOW, fail_update=True)
+    conf = cfg(posting_enabled=True, daily_cap=1)
+    do_run(tmp_path, http, conf, bot, store=store)
+    assert len(bot.created) == 1
+    # Next run: an earlier-sorted new post is due too (first_embed_seen ties: key order "3ka" < "3kz").
+    http.pages[FEED] = rss("https://news.test/a2")
+    http.pages["https://news.test/a2"] = page(bsky_quote(DID_A, "3ka"))
+    _, stats, _ = do_run(tmp_path, http, conf, bot, now=NOW)
+    assert len(bot.created) == 1 and stats.posting.already_quoted == 1 and stats.posting.held_by_cap == 1
+
+
+def test_script_data_handle_and_official_embed_of_one_post_are_one_quotable_hit(tmp_path):
+    """Handle-form URL in script data + DID blockquote of the same post: after resolution
+    they are one hit with the stronger type (one occurrence, quoted, counted once)."""
+    script = '<script>var d={"u":"https:\\/\\/bsky.app\\/profile\\/alice.test\\/post\\/3kh"}</script>'
+    http = FakeHttp({FEED: rss("https://news.test/a1"),
+                     "https://news.test/a1": page(script, bsky_quote(DID_A, "3kh")),
+                     f"{APPVIEW}/xrpc/com.atproto.identity.resolveHandle?handle=alice.test": {"did": DID_A}})
+    bot = FakeBsky()
+    do_run(tmp_path, http, cfg(posting_enabled=True), bot)
+    assert [o["embed_type"] for o in occurrences(tmp_path)] == ["blockquote"]
+    assert articles(tmp_path)[0]["embeds"] == {"bluesky": 1}
+    assert len(bot.created) == 1
+
+
+def test_page_furniture_of_one_outlet_does_not_suppress_a_real_embed_elsewhere(tmp_path):
+    other = "https://other.test/rss"
+    arts = [f"https://news.test/a{i}" for i in range(3)]
+    script = f'<script>var d={{"u":"https:\\/\\/bsky.app\\/profile\\/{DID_A}\\/post\\/3kx"}}</script>'
+    http = FakeHttp({FEED: rss(*arts), **{a: page(script) for a in arts},
+                     other: rss("https://other.test/b1"), "https://other.test/b1": page(bsky_quote(DID_A, "3kx"))})
+    fs = FeedSet([FeedConfig("News", FEED, outlet="Example News"), FeedConfig("Other", other, outlet="Other News")])
+    bot = FakeBsky()
+    do_run(tmp_path, http, cfg(posting_enabled=True), bot, fs=fs)
+    types = {o["outlet"]: o["embed_type"] for o in occurrences(tmp_path)}
+    assert types == {"Example News": "script-data+template", "Other News": "blockquote"}
+    assert len(bot.created) == 1
+
+
+def test_furniture_in_one_outlet_does_not_cancel_a_pending_quote_from_another(tmp_path):
+    other = "https://other.test/rss"
+    fs = FeedSet([FeedConfig("News", FEED, outlet="Example News"), FeedConfig("Other", other, outlet="Other News")])
+    http = FakeHttp({FEED: rss(), other: rss("https://other.test/b1"),
+                     "https://other.test/b1": page(bsky_quote(DID_A, "3kx"))})
+    do_run(tmp_path, http, cfg(posting_enabled=True, max_posts_per_run=0), FakeBsky(), fs=fs)
+    arts = [f"https://news.test/a{i}" for i in range(3)]
+    http.pages[FEED] = rss(*arts)
+    http.pages.update({a: page(bsky_quote(DID_A, "3kx")) for a in arts})
+    bot = FakeBsky()
+    do_run(tmp_path, http, cfg(posting_enabled=True), bot, fs=fs, now=NOW + timedelta(minutes=30))
+    assert len(bot.created) == 1

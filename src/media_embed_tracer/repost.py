@@ -10,7 +10,7 @@
   ever leave n/a. script-data (page-wide script JSON, which v1 did not scan) never does.
 * Posting disabled => new real embeds become `skipped`, never `pending`, so turning
   posting on later does not flood the account with a backlog.
-* A pending post is only eligible within REPOST_MAX_AGE_HOURS of first_embed_seen;
+* A pending or retry post is only eligible within REPOST_MAX_AGE_HOURS of first_embed_seen;
   older ones become `skipped` ("too old").
 * Transient errors -> `retry` with exponential backoff (next_try); after
   max_attempts the post becomes `failed`. Permanent errors -> `failed` at once.
@@ -71,7 +71,7 @@ def on_real_embed(post: Post, now: datetime, posting_enabled: bool,
 
 
 def expire_if_stale(post: Post, now: datetime, max_age_hours: float) -> bool:
-    if post.repost_status != PENDING:
+    if post.repost_status not in (PENDING, RETRY):
         return False
     seen = parse_iso(post.first_embed_seen) or parse_iso(post.first_seen)
     if seen is None or now - seen > timedelta(hours=max_age_hours):

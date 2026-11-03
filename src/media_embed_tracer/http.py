@@ -9,6 +9,7 @@ import time
 from dataclasses import dataclass
 
 import requests
+import urllib3
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -75,6 +76,18 @@ class FetchResult:
     encoding: str = ""
 
 
+def _chunks(resp, size: int):
+    """Body chunks. On a urllib3 response, read1() returns whatever one socket read
+    delivered, so the caller's deadline is checked after every read: iter_content() waits
+    for a full chunk, which a server trickling bytes can stretch far past any deadline."""
+    raw = getattr(resp, "raw", None)
+    if not isinstance(raw, urllib3.response.BaseHTTPResponse):
+        yield from resp.iter_content(size)
+        return
+    while chunk := raw.read1(size, decode_content=True):
+        yield chunk
+
+
 class Http:
     def __init__(self, timeout: float = 20.0, user_agent: str = "", max_bytes: int = 8_000_000,
                  session: requests.Session | None = None) -> None:
@@ -101,7 +114,7 @@ class Http:
             with self.session.get(url, headers={"Accept": accept}, timeout=(min(10.0, timeout), timeout),
                                   stream=True, allow_redirects=True) as resp:
                 chunks, size = [], 0
-                for chunk in resp.iter_content(65536):
+                for chunk in _chunks(resp, 65536):
                     chunks.append(chunk)
                     size += len(chunk)
                     if size > self.max_bytes:
@@ -113,7 +126,8 @@ class Http:
                 return FetchResult(resp.ok, resp.url, resp.status_code, content, content_type,
                                    "" if resp.ok else f"HTTP {resp.status_code}",
                                    encoding=_encoding(content_type, resp.encoding, content))
-        except requests.RequestException as exc:
+        except (requests.RequestException, urllib3.exceptions.HTTPError) as exc:
+            # urllib3 errors: raised directly by read1() (iter_content wrapped them)
             return FetchResult(False, url, error=f"{type(exc).__name__}: {exc}"[:300])
 
     def fetch_html(self, url: str) -> FetchResult:

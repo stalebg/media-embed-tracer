@@ -40,7 +40,7 @@ How an embed was found:
 Only the page's main `<article>` is scanned, without teaser cards, related-story boxes or
 other page furniture, so a post in a teaser is not credited to every page that shows it.
 A post still found in 3 or more articles of one outlet in one run is recorded as
-`<type>+template` and never quoted.
+`<type>+template` there and never quoted from that outlet.
 
 Field lists, canonical id formats and storage internals are in [DESIGN.md](DESIGN.md).
 

@@ -132,6 +132,10 @@ def parse_feed_bytes(content: bytes, feed: FeedConfig) -> list[Entry]:
     parsed = feedparser.parse(content)
     if parsed.bozo and not parsed.entries:
         raise ValueError(f"unparseable feed: {parsed.get('bozo_exception')}")
+    if not parsed.entries and not parsed.get("version"):
+        # Parsed cleanly but is no RSS/Atom document (an HTML maintenance page, say): a
+        # failure, not a healthy empty feed. Empty RSS/Atom feeds still have a version.
+        raise ValueError("not a feed (no RSS/Atom root)")
     entries = []
     for e in parsed.entries:
         link = e.get("link") or ""

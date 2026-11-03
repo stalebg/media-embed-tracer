@@ -82,3 +82,75 @@ def test_latin1_and_ascii_labels_decode_as_windows_1252_like_browsers(label):
     for ctype, meta in ((f"text/html; charset={label}", ""), ("text/html", f'<meta charset="{label}">')):
         res = Http(session=Session(Resp([meta.encode() + body], ctype=ctype, encoding=label))).fetch_html("https://a")
         assert res.encoding == "cp1252" and res.text == meta + "<p>Søk – «x» ’ €</p>"
+
+
+def _trickle_server(body: bytes, delay: float, headers: str):
+    """A loopback HTTP server that sends `body` one byte every `delay` seconds."""
+    import socket
+    import threading
+    import time
+
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    stop = threading.Event()
+
+    def serve():
+        conn, _ = srv.accept()
+        with conn:
+            conn.recv(65536)
+            conn.sendall(f"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n{headers}Connection: close\r\n\r\n".encode())
+            if not delay:
+                conn.sendall(body)
+                return
+            for i in range(len(body)):
+                if stop.is_set():
+                    return
+                try:
+                    conn.sendall(body[i:i + 1])
+                except OSError:
+                    return
+                time.sleep(delay)
+
+    threading.Thread(target=serve, daemon=True).start()
+    return f"http://127.0.0.1:{srv.getsockname()[1]}/", stop, srv
+
+
+@pytest.mark.parametrize("chunked", [False, True])
+def test_overall_deadline_bounds_a_trickling_body(chunked):
+    """Each byte arrives well within the read timeout, so only the overall deadline
+    (2 x timeout) can stop the download; it must not wait for a full 64 KB chunk."""
+    import time
+
+    body = b"<html>" + b"x" * 200 + b"</html>"   # ~40 s at 0.2 s per byte
+    if chunked:
+        body = f"{len(body):x}\r\n".encode() + body + b"\r\n0\r\n\r\n"
+        headers = "Transfer-Encoding: chunked\r\n"
+    else:
+        headers = f"Content-Length: {len(body)}\r\n"
+    url, stop, srv = _trickle_server(body, 0.2, headers)
+    try:
+        t0 = time.monotonic()
+        res = Http(timeout=0.75).get(url)
+        elapsed = time.monotonic() - t0
+    finally:
+        stop.set()
+        srv.close()
+    assert not res.ok and res.error == "deadline exceeded"
+    assert elapsed < 4
+
+
+def test_a_normal_loopback_response_is_read_in_full():
+    import gzip
+
+    page = b"<html>" + "blåbær".encode() * 5000 + b"</html>"
+    for headers, body in ((f"Content-Length: {len(page)}\r\n", page),
+                          (f"Content-Encoding: gzip\r\nContent-Length: {len(gzip.compress(page))}\r\n",
+                           gzip.compress(page))):
+        url, stop, srv = _trickle_server(body, 0, headers)
+        try:
+            res = Http(timeout=5).get(url)
+        finally:
+            stop.set()
+            srv.close()
+        assert res.ok and res.content == page
