@@ -1,8 +1,9 @@
 """Quote-post text and link facet for Bluesky (pure, no I/O).
 
 Limits (verified, app.bsky.feed.post lexicon): text <= 300 graphemes and <= 3000 bytes;
-langs <= 3 entries. The article URL is shown shortened (like Bluesky clients do) and
-carried in full by a link facet whose offsets are UTF-8 byte offsets.
+langs <= 3 entries. As in v1 the full article URL is shown at the end and made clickable by a
+link facet (UTF-8 byte offsets): "Quoted by {outlet} → {title} {url}". The title is shortened
+to fit; only a URL too long to fit at all is shown shortened (the facet still carries it in full).
 """
 
 from __future__ import annotations
@@ -62,7 +63,9 @@ class QuoteText:
 
 def build_quote_text(template: str, outlet: str, title: str, article_url: str) -> QuoteText:
     validate_template(template)
-    shown = display_url(article_url)
+    shown = article_url  # v1 format: the full URL, as written
+    if graphemes(template.format(outlet=outlet, title="").strip() + " " + shown) > MAX_GRAPHEMES - 20:
+        shown = display_url(article_url)
     suffix = " " + shown
 
     def body(t: str, o: str = outlet) -> str:
