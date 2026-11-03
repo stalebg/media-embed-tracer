@@ -110,7 +110,7 @@ Environment variables the code reads (defaults in brackets):
 | `BLUESKY_POSTING_ENABLED` [false] | Turn on quote-posting |
 | `BLUESKY_HANDLE`, `BLUESKY_APP_PASSWORD` | Bot account |
 | `BLUESKY_SERVICE` [bsky.social], `BLUESKY_APPVIEW` [public.api.bsky.app] | Login service, AppView for lookups |
-| `QUOTE_TEMPLATE` [`Embedded by {outlet}: {title}`] | Quote text; only `{outlet}` and `{title}` |
+| `QUOTE_TEMPLATE` [`Quoted by {outlet} → {title}`] | Quote text; only `{outlet}` and `{title}` |
 | `QUOTE_LANGS` [en], `QUOTE_LINKS` [true] | Post languages (max 3); quote plain links too |
 | `REPOST_MAX_AGE_HOURS` [24] | Only quote posts first embedded within this window |
 | `MAX_POSTS_PER_RUN` [10], `POST_DELAY_SECONDS` [2] | Quotes per run, seconds between quotes |
@@ -122,7 +122,7 @@ Environment variables the code reads (defaults in brackets):
 
 Posting is off until you set `BLUESKY_POSTING_ENABLED=true` and add the bot's handle and an
 app password. Then, for each Bluesky post found as an embed (or link), the bot quote-posts
-it with `Embedded by {outlet}: {title}` and the article link.
+it with `Quoted by {outlet} → {title}` and the article link.
 
 - It only quotes posts first embedded in the last 24 hours, so turning posting on never
   floods the account with a backlog.

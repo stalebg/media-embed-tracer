@@ -293,7 +293,7 @@ def test_quote_record_contents(tmp_path):
     assert code == EXIT_OK and stats.posting.posted == 1
     rec = bot.created[0]
     assert rec["langs"] == ["nb"]
-    assert rec["text"].startswith("Embedded by Example News: Title & a1 ")
+    assert rec["text"].startswith("Quoted by Example News → Title & a1 ")
     assert rec["facets"][0]["features"][0]["uri"] == "https://news.test/a1"
     p = posts(tmp_path)[f"bluesky:at://{DID_A}/app.bsky.feed.post/3k"]
     assert p["repost_status"] == "posted" and p["quoted_uri"] == f"at://{BOT}/app.bsky.feed.post/q1"

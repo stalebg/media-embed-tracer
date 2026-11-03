@@ -21,9 +21,9 @@ def facet_text(q):
 
 
 def test_short_text_untouched():
-    q = build_quote_text("Embedded by {outlet}: {title}", "Example News", "Short title", URL)
-    assert q.text.startswith("Embedded by Example News: Short title ")
-    assert facet_text(q) == display_url(URL)
+    q = build_quote_text("Quoted by {outlet} → {title}", "Example News", "Short title", URL)
+    assert q.text.startswith("Quoted by Example News → Short title ")
+    assert facet_text(q) == URL
     assert q.facets[0]["features"][0]["uri"] == URL
 
 
@@ -34,11 +34,11 @@ def test_short_text_untouched():
     "é" * 500,                 # combining accents
 ])
 def test_long_titles_fit_limits(title):
-    q = build_quote_text("Embedded by {outlet}: {title}", "Outlet", title, URL)
+    q = build_quote_text("Quoted by {outlet} → {title}", "Outlet", title, URL)
     assert graphemes(q.text) <= MAX_GRAPHEMES
     assert len(q.text.encode()) <= 3000
-    assert q.text.endswith(display_url(URL))
-    assert facet_text(q) == display_url(URL)
+    assert q.text.endswith(URL)
+    assert facet_text(q) == URL
 
 
 def test_facet_offsets_are_bytes_not_chars():
@@ -46,7 +46,7 @@ def test_facet_offsets_are_bytes_not_chars():
     start = q.facets[0]["index"]["byteStart"]
     assert start == len("Ño → Émoji 🎉 title ".encode())
     assert start != len("Ño → Émoji 🎉 title ")
-    assert facet_text(q) == "ex.com/a"
+    assert facet_text(q) == "https://ex.com/a"
 
 
 def test_facet_not_fooled_by_url_in_title():
@@ -74,3 +74,16 @@ def test_langs_and_record():
     assert rec["embed"] == {"$type": "app.bsky.embed.record",
                             "record": {"uri": "at://did:plc:x/app.bsky.feed.post/1", "cid": "cid1"}}
     assert "langs" not in build_record(q, "u", "c", [], "t")
+
+
+def test_v1_format_full_url():
+    q = build_quote_text("Quoted by {outlet} → {title}", "Engadget", "A title", "https://www.engadget.com/a/b.html")
+    assert q.text == "Quoted by Engadget → A title https://www.engadget.com/a/b.html"
+    assert facet_text(q) == "https://www.engadget.com/a/b.html"
+
+
+def test_absurdly_long_url_falls_back_to_short_display():
+    long_url = "https://example.com/" + "x" * 400
+    q = build_quote_text("Quoted by {outlet} → {title}", "Outlet", "T", long_url)
+    assert graphemes(q.text) <= 300
+    assert q.facets[0]["features"][0]["uri"] == long_url
