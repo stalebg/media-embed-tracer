@@ -15,7 +15,7 @@ import regex
 MAX_GRAPHEMES = 300
 MAX_BYTES = 3000
 MAX_LANGS = 3
-DEFAULT_TEMPLATE = "Embedded by {outlet}: {title}"
+DEFAULT_TEMPLATE = "Quoted by {outlet} → {title}"
 _ALLOWED_FIELDS = {"outlet", "title"}
 
 

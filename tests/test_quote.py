@@ -21,8 +21,8 @@ def facet_text(q):
 
 
 def test_short_text_untouched():
-    q = build_quote_text("Embedded by {outlet}: {title}", "Example News", "Short title", URL)
-    assert q.text.startswith("Embedded by Example News: Short title ")
+    q = build_quote_text("Quoted by {outlet} → {title}", "Example News", "Short title", URL)
+    assert q.text.startswith("Quoted by Example News → Short title ")
     assert facet_text(q) == display_url(URL)
     assert q.facets[0]["features"][0]["uri"] == URL
 
@@ -34,7 +34,7 @@ def test_short_text_untouched():
     "é" * 500,                 # combining accents
 ])
 def test_long_titles_fit_limits(title):
-    q = build_quote_text("Embedded by {outlet}: {title}", "Outlet", title, URL)
+    q = build_quote_text("Quoted by {outlet} → {title}", "Outlet", title, URL)
     assert graphemes(q.text) <= MAX_GRAPHEMES
     assert len(q.text.encode()) <= 3000
     assert q.text.endswith(display_url(URL))
