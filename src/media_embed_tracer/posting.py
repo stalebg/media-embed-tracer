@@ -9,7 +9,7 @@ Posts held back by a cap stay `pending` and expire after REPOST_MAX_AGE_HOURS.
 
 Idempotency: before quoting, the bot's own latest posts are read and any subject it already
 quoted is marked `posted` instead. This also repairs a status that was lost because the
-store write failed after a successful quote.
+store write failed after a successful quote; repaired quotes count toward the daily caps.
 """
 
 from __future__ import annotations
@@ -106,6 +106,17 @@ def post_pending(store: Store, posts: dict[str, Post], client: BlueskyClient, no
         log.error("%s", private_error(stats.error))
         return stats
 
+    # Repair first: a quote whose status write was lost counts toward the caps before any
+    # new quote is made. Its creation time is not known, so it counts as within 24 h.
+    for p in due:
+        if p.canonical_id in quoted:
+            repost.mark_posted(p, quoted[p.canonical_id], now)
+            stats.already_quoted += 1
+            total_24h += 1
+            per_author[bluesky.actor_of(p.canonical_id)] += 1
+            save(p)
+    due = [p for p in due if p.repost_status != repost.POSTED]
+
     attempts = 0
     for p in due:
         if attempts >= limits.max_posts or (limits.daily_cap and total_24h >= limits.daily_cap):
@@ -121,11 +132,6 @@ def post_pending(store: Store, posts: dict[str, Post], client: BlueskyClient, no
         if actor == client.did:
             repost.mark_skipped(p, "own post", now)
             stats.skipped += 1
-            save(p)
-            continue
-        if subject in quoted:
-            repost.mark_posted(p, quoted[subject], now)
-            stats.already_quoted += 1
             save(p)
             continue
         if limits.author_daily_cap and per_author[actor] >= limits.author_daily_cap:

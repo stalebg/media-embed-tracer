@@ -27,9 +27,10 @@
 - Content root: the main `<article>` only (article body, else the `<h1>` holder, else most
   text; others if at least half its size), minus nested `<article>`s, aside/nav/footer and
   teaser/related/recommendation/preview/promo boxes. Inline scripts stay page-wide.
+  Teaser-like `<article>`s alone do not outrank `<main>` or a content container.
 - Page furniture: a post found in 3+ articles of one outlet in one run is recorded as
-  `<type>+template`, never quoted (a pending one becomes skipped) and not written to
-  `All Embeds`. Earlier runs are not
+  `<type>+template` for that outlet, never quoted from it (a pending one from that outlet
+  becomes skipped) and not written to `All Embeds`. A real embed at another outlet still counts. Earlier runs are not
   counted, so a post re-embedded over days keeps one label; the content root above is the
   real protection.
 - `article_summary` is the feed summary, HTML stripped, max 500 chars, never logged. It is
@@ -194,9 +195,10 @@ posted, skipped, failed: terminal
 ```
 
 - Eligible: Bluesky `blockquote`, `iframe`, `widget`, and `link` unless `QUOTE_LINKS=false`.
-- Pending posts older than `REPOST_MAX_AGE_HOURS` become skipped.
+- Pending and retry posts older than `REPOST_MAX_AGE_HOURS` become skipped.
 - Before posting: read the bot's feed (≥100, or daily cap × window days + 1; max 1000).
-  Already-quoted subjects become `posted`. If the read fails, nothing is posted (exit 5).
+  Already-quoted subjects become `posted` first and count toward the daily caps. If the
+  read fails, nothing is posted (exit 5).
 - Subject fetched via `getPosts` through the AppView for the CID and `embeddingDisabled`.
 - Caps per account: `MAX_POSTS_PER_RUN`, `BLUESKY_DAILY_CAP`, `BLUESKY_AUTHOR_DAILY_CAP`,
   opt-out list. Held posts stay pending until they expire.

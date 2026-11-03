@@ -106,6 +106,11 @@ def _content_roots(soup: BeautifulSoup) -> list[Tag]:
     articles: list[Tag] = soup.find_all("article")
     top = [a for a in articles if not any(p.name == "article" for p in a.parents)]
     roots: list[Tag] = []
+    # Teaser-like <article>s alone do not outrank <main> or a marked content container;
+    # they are only used when neither exists.
+    if top and all(_is_furniture_root(a) for a in top) and (
+            soup.find("main") or any(soup.select_one(sel) for sel in _CONTENT_SELECTORS)):
+        top = []
     if top:
         main = _main_article(top, soup)
         size = _text_len(main)
@@ -226,8 +231,9 @@ def detect(html: str) -> list[Hit]:
                     if attr.startswith("data-") and isinstance(value, str) and (
                             "//" in value or value.startswith("at://")):
                         if out.add(match_url(clean_url(value)), "widget"):
-                            found = True
                             break
+                # A bare data-* URL does not claim its descendants: the element may be a
+                # wrapper around a different, real embed.
             if found:
                 claimed.update(id(d) for d in el.descendants)
                 continue

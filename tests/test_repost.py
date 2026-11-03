@@ -89,3 +89,12 @@ def test_terminal_states_are_final(status, now):
 def test_na_cannot_be_posted_directly(now):
     with pytest.raises(repost.TransitionError):
         repost.mark_posted(post("n/a"), "x", now)
+
+
+def test_stale_retry_also_becomes_skipped(now):
+    """A post in retry (e.g. through a login outage) expires like a pending one."""
+    p = post("retry", first_embed_seen=iso(now - timedelta(hours=48)), next_try=iso(now - timedelta(hours=40)))
+    assert repost.expire_if_stale(p, now, 24)
+    assert p.repost_status == "skipped" and not repost.is_due(p, now)
+    fresh = post("retry", first_embed_seen=iso(now - timedelta(hours=2)))
+    assert not repost.expire_if_stale(fresh, now, 24) and fresh.repost_status == "retry"

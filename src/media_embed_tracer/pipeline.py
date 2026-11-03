@@ -20,6 +20,7 @@ from .feeds import FeedConfig, FeedSet, fetch_feed
 from .http import Http
 from .models import (
     DETECTOR_VERSION,
+    EMBED_PRIORITY,
     TEMPLATE_SUFFIX,
     ArticleCheck,
     FeedHealth,
@@ -44,9 +45,9 @@ EXIT_OK, EXIT_CONFIG, EXIT_STORE, EXIT_LOGIN, EXIT_FETCH, EXIT_BLUESKY = 0, 1, 2
 MAX_FETCH_ERRORS = 3
 # A post found in this many different articles of one outlet in one run is page furniture
 # (a teaser, live box or footer widget the detector could not tell apart): recorded with
-# embed_type "<type>+template" and never quoted. Only this run's articles count: earlier
-# runs are not consulted, so a post genuinely re-embedded over days keeps one label in the
-# dataset. The main-article detection (detect._content_roots) is the real protection.
+# embed_type "<type>+template" and never quoted from that outlet. Only this run's articles
+# count: earlier runs are not consulted, so a post genuinely re-embedded over days keeps one
+# label in the dataset. The main-article detection (detect._content_roots) is the real protection.
 TEMPLATE_MIN_ARTICLES = 3
 MIN_ARTICLES_FOR_RATIO = 4
 
@@ -97,8 +98,8 @@ class _Recorder:
         self.changed_posts: dict[str, Post] = {}
         self.queue: list[QueuedHit] = []
         self._queued_keys = set()
-        # First quotable occurrence per post this run; quote state is set in finish().
-        self._quotable: dict[str, tuple[Post, _Context]] = {}
+        # Quotable occurrences per post this run (in order); quote state is set in finish().
+        self._quotable: dict[str, tuple[Post, list[_Context]]] = {}
 
     def record(self, hit: Hit, ctx: _Context, seen: SeenArticle | None, already: set[str]) -> bool:
         """Returns True if a new occurrence was written."""
@@ -121,7 +122,7 @@ class _Recorder:
         self.stats.by_platform[ref.platform] += 1
         self.stats.by_type[hit.embed_type] += 1
         if repost.is_quotable(ref.platform, hit.embed_type, self.cfg.quote_links):
-            self._quotable.setdefault(hit.key, (post, ctx))
+            self._quotable.setdefault(hit.key, (post, []))[1].append(ctx)
         if seen is not None:
             seen.add_keys([hit.key])
         return True
@@ -132,21 +133,25 @@ class _Recorder:
         articles: dict[tuple[str, str], set[str]] = {}
         for o in self.occurrences:
             articles.setdefault((o.outlet, o.key), set()).add(o.article_url)
-        template = {key for (_outlet, key), urls in articles.items() if len(urls) >= TEMPLATE_MIN_ARTICLES}
+        # Page furniture is a property of one outlet's pages: (outlet, post key).
+        template = {ok for ok, urls in articles.items() if len(urls) >= TEMPLATE_MIN_ARTICLES}
         for o in self.occurrences:
-            if o.key in template and not o.embed_type.endswith(TEMPLATE_SUFFIX):
+            if (o.outlet, o.key) in template and not o.embed_type.endswith(TEMPLATE_SUFFIX):
                 o.embed_type += TEMPLATE_SUFFIX
-        for key in template:
+        for outlet, key in template:
             post = self.changed_posts.get(key) or self.state.posts.get(key)
-            if post is not None and post.repost_status in (repost.PENDING, repost.RETRY):
+            if post is not None and post.repost_status in (repost.PENDING, repost.RETRY) \
+                    and post.via_outlet == outlet:
                 repost.mark_skipped(post, "page furniture (in many articles of one outlet)", self.now)
                 self.changed_posts[key] = post
-        for key, (post, ctx) in self._quotable.items():
-            if key in template:
+        for key, (post, contexts) in self._quotable.items():
+            # The first quotable occurrence that is not page furniture of its outlet.
+            ctx = next((c for c in contexts if (c.outlet, key) not in template), None)
+            if ctx is None:
                 continue
             if repost.on_real_embed(post, self.now, self.cfg.posting_enabled, ctx.final_url, ctx.title, ctx.outlet):
                 self.changed_posts[key] = post
-        return len(template)
+        return len({key for _outlet, key in template})
 
     def enqueue(self, hit: Hit, ctx: _Context, attempts: int = 0, first_seen: str = "") -> None:
         k = (ctx.article_url, hit.ref.post_url)
@@ -158,6 +163,17 @@ class _Recorder:
             final_url=ctx.final_url, outlet=ctx.outlet, domain=ctx.domain, feed=ctx.feed,
             article_title=ctx.title, article_published=ctx.published, first_seen=first_seen or iso(self.now),
             attempts=attempts, article_summary=ctx.summary))
+
+
+def _merge_hits(hits: list[Hit]) -> list[Hit]:
+    """One hit per key after resolution (a handle URL and a DID URL of one post become the
+    same key), keeping the strongest embed type. Order of first appearance is kept."""
+    best: dict[str, Hit] = {}
+    for h in hits:
+        prev = best.get(h.key)
+        if prev is None or EMBED_PRIORITY[h.embed_type] > EMBED_PRIORITY[prev.embed_type]:
+            best[h.key] = h
+    return list(best.values())
 
 
 def run(cfg: Config, feedset: FeedSet, store: Store, http: Http, resolver: Resolver,
@@ -254,7 +270,7 @@ def run(cfg: Config, feedset: FeedSet, store: Store, http: Http, resolver: Resol
         try:
             res = http.fetch_html(seen.url)
             if res.ok:
-                hits = [resolver.canonicalize(h) for h in detect(res.text)]
+                hits = _merge_hits([resolver.canonicalize(h) for h in detect(res.text)])
         except Exception as exc:
             stats.crashed += 1
             log.error("check crashed %s: %s; retried next run", private(seen.url), type(exc).__name__)

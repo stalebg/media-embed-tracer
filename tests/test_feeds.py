@@ -74,3 +74,14 @@ def test_feed_names_json_v1_compat(tmp_path):
     assert fs.outlet_for(None, "https://www.h.test/b") == "H"
     with pytest.raises(FeedConfigError):
         load_feeds(feeds_file=str(p), feed_names_json="[1]")
+
+
+def test_a_non_feed_document_is_a_failure_but_an_empty_feed_is_not():
+    """An HTTP 200 maintenance page parses without error and has no entries: not a feed."""
+    entries, err = fetch_feed(FakeHttp({"https://n.test/rss": b"<html><body>Feed moved</body></html>"}),
+                              FeedConfig("N", "https://n.test/rss"))
+    assert entries == [] and err.startswith("parse error: not a feed")
+    empty_rss = b'<?xml version="1.0"?><rss version="2.0"><channel><title>t</title></channel></rss>'
+    empty_atom = b'<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>t</title></feed>'
+    for body in (empty_rss, empty_atom):
+        assert fetch_feed(FakeHttp({"https://n.test/rss": body}), FeedConfig("N", "https://n.test/rss")) == ([], "")

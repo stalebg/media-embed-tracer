@@ -212,3 +212,33 @@ def test_archived_page_links_and_iframes_match_the_original_post():
     got = {h.key: h.embed_type for h in detect(html)}
     assert got == {"bluesky:at://x.bsky.social/app.bsky.feed.post/abc": "link",
                    "x:123456789": "iframe", "x:987654321": "blockquote"}
+
+
+# --- external review fixes ---------------------------------------------------------
+
+def test_a_data_url_wrapper_does_not_hide_the_embed_inside_it():
+    """A wrapper whose data-* attribute names another post must not claim the real
+    embed nested inside it (the wrapper's own URL is still recorded)."""
+    html = ('<article><p>Text</p><div data-source-url="https://x.com/a/status/123">'
+            f'<blockquote class="bluesky-embed" data-bluesky-uri="at://{DID}/app.bsky.feed.post/3kreal">'
+            f'<a href="https://bsky.app/profile/{DID}/post/3kreal">p</a></blockquote></div></article>')
+    got = {h.key: h.embed_type for h in detect(html)}
+    assert got[f"bluesky:at://{DID}/app.bsky.feed.post/3kreal"] == "blockquote"
+    assert "x:123" in got
+
+
+def test_a_teaser_article_does_not_replace_the_marked_article_body():
+    html = (f'<html><body><main><div class="article-body"><p>The story itself, at some length.</p>'
+            f'<blockquote class="bluesky-embed" data-bluesky-uri="at://{DID}/app.bsky.feed.post/3kreal"></blockquote>'
+            f'</div><article class="teaser"><p>Other story</p>'
+            f'<blockquote class="bluesky-embed" data-bluesky-uri="at://{DID}/app.bsky.feed.post/3kteaser"></blockquote>'
+            '</article></main></body></html>')
+    assert [h.ref.canonical_id.rsplit("/", 1)[1] for h in detect(html)] == ["3kreal"]
+
+
+def test_a_page_whose_only_article_is_a_teaser_without_other_content_still_uses_it():
+    """Last resort kept: no <main> or content container, so the teaser-like article is scanned."""
+    html = (f'<html><body><article class="teaser"><p>x</p>'
+            f'<blockquote class="bluesky-embed" data-bluesky-uri="at://{DID}/app.bsky.feed.post/3konly"></blockquote>'
+            '</article></body></html>')
+    assert [h.ref.canonical_id.rsplit("/", 1)[1] for h in detect(html)] == ["3konly"]
